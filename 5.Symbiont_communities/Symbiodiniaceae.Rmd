@@ -506,6 +506,7 @@ BM_DP <- glm(D.Prp ~ Nutrients + Temp,
     
 LM_DP  <- lmer(D.Prp ~ Nutrients + Temp + (1|Colony), data=Ofav)
     anova(LM_DP)
+    ranova(LM_DP)
     summary(LM_DP)
     #plot(LM_DP)
     step(LM_DP)
