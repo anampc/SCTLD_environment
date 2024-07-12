@@ -1,0 +1,642 @@
+---
+title: "Experimental conditions"
+author: "Ana M. Palacio"
+date: "`r Sys.Date()`"
+output:
+  pdf_document:
+    toc: yes
+html_document:
+    code_folding: hide
+    fig_height: 6
+    fig_width: 6
+    df_print: paged
+    toc: yes
+    toc_float: yes
+bibliography: packages.bib
+nocite: '@*'
+editor_options:
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning=FALSE, message=FALSE)
+```
+
+# General project set-up 
+
+```{r libraries, results="hide"}
+
+# Load all libraries and sources required to run the script
+    library(tidyverse)
+    library(ggthemes)
+    library(ggplot2)
+    library(plyr)
+    library(tidyr)
+
+    library(plotrix)
+    library(lme4)
+    library(lmerTest)
+    library(emmeans)
+    library(reshape2)
+
+# Graphs
+# Plots
+MyTheme<-theme_bw() +  
+theme(legend.position="top",
+          plot.background=element_blank(),
+          #axis.text.x = element_text(angle = 90, vjust = 0.5),
+          panel.grid.major.y = element_blank(),
+          panel.grid.major.x = element_blank(),
+          panel.grid.minor.x = element_blank(),
+          panel.grid.minor.y = element_blank(),
+          legend.box.background = element_rect(),
+          legend.title = element_blank(),
+          panel.background =element_rect(fill = NA, 
+                                         color = "black"))
+
+# Treatment colors
+Treat_fill<-scale_fill_manual(values =
+                           c("#2b83ba", "#003399",
+                             "#d7191c", "#660000"))
+
+Treat_colour<-scale_colour_manual(values =
+                           c("#2b83ba", "#003399",
+                             "#d7191c", "#660000"))
+  
+```
+
+# 1. Temperature
+
+```{r}
+# Data
+    Temp<-read.csv("Data/Temperature.csv", header = TRUE)
+    #summary(Temp)
+    Temp$Time<-as.POSIXct(Temp$Time, format="%m/%d/%Y %H:%M",
+                               tz = "America/New_York" )
+    Temp<-Temp %>% filter(!between(Time, as.POSIXct('2023-05-18 08:50:00.00'),
+                                as.POSIXct('2023-05-18 09:55:00.00')))
+   
+    
+    Temp <- gather(Temp, Tank, Temperature, 
+                   Tank.1:Tank.8, factor_key=TRUE)
+    #Temp<-Temp[Temp$Tank!="Tank.6",]
+    #Temp<-Temp[Temp$Tank!="Tank.7",]
+    Temp<-Temp %>% mutate(Group =
+                     case_when(Tank == "Tank.1" ~ "Control Temperature", 
+                               Tank == "Tank.2" ~ "High Temperature", 
+                               Tank == "Tank.3" ~ "High Temperature", 
+                               Tank == "Tank.4" ~ "Control Temperature",
+                               Tank == "Tank.5" ~ "Control Temperature", 
+                               Tank == "Tank.6" ~ "Donor colonies", 
+                               Tank == "Tank.7" ~ "Donor colonies", 
+                               Tank == "Tank.8" ~ "High Temperature"))
+    Temp$Group<-factor(Temp$Group, levels = c("Control Temperature",
+                                              "High Temperature",
+                                              "Donor colonies"))
+    
+    Temp<-Temp %>% mutate(Group2 =
+                     case_when(Group == "Control Temperature" ~ "28 C", 
+                               Group == "High Temperature" ~ "31 C", 
+                               Group == "Donor colonies" ~ "Donor colonies"))
+    
+    # Remove data from tank that had a sensor failed
+    Temp<-Temp %>% filter((Time<as.POSIXct('2023-06-02 00:50:00.00') | 
+                          Tank!="Tank.8"))
+    Temp$Date<-as.Date(Temp$Time)
+    Temp$Day<-as.numeric(difftime(Temp$Date, 
+                                  as.Date("2023-05-01"), units="days"))
+    summary(Temp)
+```
+
+Temperature conditions during the whole experiment 
+
+```{r}
+Temp_summary <- ddply (Temp[Temp$Day>0, ], .(Group2),
+                         summarise,
+                meanT = mean (Temperature, na.rm = T), 
+                sdT = sd (Temperature, na.rm = T), 
+                seT = std.error (Temperature, na.rm = T))
+Temp_summary
+```
+
+Temperature conditions excluding ramp-up days
+
+```{r}
+Temp_summary <- ddply (Temp[Temp$Day>5, ], .(Group2),
+                         summarise,
+                meanT = mean (Temperature, na.rm = T), 
+                sdT = sd (Temperature, na.rm = T), 
+                seT = std.error (Temperature, na.rm = T))
+Temp_summary
+```
+
+
+### Plot temperature by tanks
+
+Raw values
+
+```{r}
+Temperature<- ggplot(Temp, aes (Time, Temperature)) +
+  geom_jitter(aes(colour=Group), alpha=1, size=0.5)+
+  # stat_summary(fun.data = "mean_cl_boot", 
+  #              geom = "errorbar", width = 0.2,  color="black" )+
+  # stat_summary(fun=mean, geom="point",  color="black") + 
+
+  theme(legend.position = "bottom")+
+  scale_y_continuous(limits = c(26, 32),
+                      breaks = seq(0,32, 2),  
+                      #   expand = c(0.01, 0.01),
+                      name=("Temperature (C)")) +
+  
+    scale_x_datetime(breaks = "7 days",
+                      date_labels = "%b %d",
+                      limits = c(as.POSIXct("2023-05-02 12:30"),
+                                 as.POSIXct("2023-06-24 18:00")),
+                      #  expand = c(0.01, 0.01),
+                      name=("Date")) +
+   
+  geom_vline(xintercept = as.POSIXct("2023-05-18"),
+              linetype=2)+
+  annotate("text", x = c(as.POSIXct("2023-05-13"), as.POSIXct("2023-06-12")), y = 27, label = "*")+
+  
+  MyTheme + facet_wrap(~Tank, ncol = 4)+
+  #facet_wrap(~(fct_rev(Tank)), ncol = 4)+
+  scale_colour_manual(
+  values = c("#2b83ba", "#d7191c", "gray"))+
+  theme(legend.position = "none")
+
+#Temperature
+```
+
+Daily mean values by tank
+
+```{r}
+Temperature<- ggplot(Temp, aes (Day, Temperature, colour=Group2)) +
+  #geom_jitter(aes(colour=Group), alpha=1, size=0.5)+
+  stat_summary(fun.data = "mean_cl_boot", 
+                geom = "errorbar", width = 0.2)+
+  stat_summary(fun=mean, geom="line", alpha=0.8) + 
+
+  theme(legend.position = "bottom")+
+  scale_y_continuous(limits = c(27.3, 31.3),
+                      breaks = seq(0,32, 1),  
+                      #   expand = c(0.01, 0.01),
+                      name=expression(Temperature~(degree~C))) +
+  scale_x_continuous(breaks = seq(0, 51, 7),
+                      name=("Days in the experiment")) +
+  
+    # scale_x_date(breaks = "7 days",
+    #                   date_labels = "%b %d",
+    #                   limits = c(as.Date("2023-05-02"),
+    #                              as.Date("2023-06-12")),
+    #                   #  expand = c(0.01, 0.01),
+    #                   name=("Date")) +
+   
+  #geom_vline(xintercept = as.Date(c("2023-05-18", "2023-06-02")),
+  #            linetype=2, alpha=0.5)+
+  # annotate("text", x = c(as.Date("2023-05-13"), 
+  #                        as.Date("2023-06-02")), y = 27.5, label = "*")+
+  geom_vline(xintercept = c(17, 32),
+              linetype=2, alpha=0.5)+
+  
+  MyTheme + facet_wrap(~Tank, ncol = 4)+
+  #facet_wrap(~(fct_rev(Tank)), ncol = 4)+
+  scale_colour_manual(
+  values = c("#2b83ba", "#d7191c", "gray"))+
+  theme(legend.position = "top")
+
+Temperature
+
+#ggsave(file="Outputs/Temperature.svg", plot=Temperature, width=8, height=4)
+```
+
+Daily mean values by treatment and experimental timeline
+
+```{r}
+TimeLine<- ggplot(Temp, aes (Day, Temperature, 
+                                colour=Group2)) +
+  #geom_jitter(aes(colour=Group), alpha=1, size=0.5)+
+  stat_summary(fun.data = "mean_cl_boot", 
+                geom = "errorbar", width = 0.2)+
+  stat_summary(fun=mean, geom="line", alpha=0.8) + 
+
+  theme(legend.position = "bottom")+
+  scale_y_continuous(limits = c(27.3, 31.3),
+                      breaks = seq(0,32, 1),  
+                      #   expand = c(0.01, 0.01),
+                      name=expression(Temperature~(degree~C))) +
+  scale_x_continuous(breaks = seq(0, 51, 8),
+                      name=("Days in the experiment")) +
+  annotate("text", x = c(14, 31), y = 27.5, label = "*")+
+  geom_vline(xintercept = c(1, 17, 32),
+              linetype=2, alpha=0.5)+
+  
+  MyTheme + facet_wrap(~Group2, ncol = 1)+
+  scale_colour_manual(
+  values = c("#2b83ba", "#d7191c", "gray"))+
+  theme(legend.position = "top")
+
+#TimeLine
+
+#ggsave(file="Outputs/TimeLine.svg", plot=TimeLine, width=4, height=6)
+```
+
+```{r}
+TimeLine2<- ggplot(Temp[Temp$Group!="Donor colonies", ], 
+                   aes (Day, Temperature, 
+                                colour=Group2)) +
+  stat_summary(fun.data = "mean_cl_boot", 
+                geom = "errorbar", width = 0.2)+
+  stat_summary(fun=mean, geom="line", alpha=0.8) + 
+
+  scale_y_continuous(limits = c(27.5, 31.1),
+                      breaks = seq(0,32, 0.5),  
+                      #   expand = c(0.01, 0.01),
+                      name=expression(Temperature~(degree~C))) +
+  scale_x_continuous(breaks = seq(0, 51, 8),
+                      name=("Days in the experiment")) +
+  annotate("text", x = c(14, 31), y = 29, label = "*")+
+  geom_vline(xintercept = c(1, 32),
+              linetype=2, alpha=0.5)+
+  
+  MyTheme + 
+  scale_colour_manual(
+  values = c("#2b83ba", "#d7191c"))+
+  theme(legend.position = "top")
+TimeLine2
+
+#ggsave(file="Outputs/TimeLine.svg", plot=TimeLine2, width=4, height=6)
+```
+
+# 2. Nutrients
+
+```{r}
+# Data
+    data<-read.csv("Data/Nutrients.csv", header = TRUE)
+    #summary(data)
+    data$N<-as.numeric(data$N)
+    data$Date<-as.Date(data$Date)
+    
+    library(lubridate)
+    data$Week<-isoweek(ymd(data$Date))
+    data$Week<-as.numeric(data$Week-17)
+    
+    data$Target<-factor(data$Target,
+                           levels=c("0", "5", "6"))
+    # data$Pump<-factor(data$Pump,
+    #                        levels=c("1", "2"))
+    
+    data<-droplevels(data)
+    data$Treatment<-factor(data$Treatment, 
+                           levels = c ("LN_28", "LN_31", "HN_28", "HN_31",
+                                       "Healthy", "Disease",  "Stock", "VAT"))
+    data$Treatment3<-factor(paste(data$Nutrients, 
+                                  data$Disease, sep = "_"))
+    data<-data[data$Date!="2023-05-18", ]
+    data$Day<-as.numeric(difftime(data$Date, 
+                                  as.Date("2023-05-01"), units="days"))
+
+    summary(data)
+```
+
+## Exploratory plots
+
+```{r}
+NH4_plot<- ggplot(data, aes (Target, NH4)) +
+  #geom_boxplot ()+
+  geom_jitter(aes(colour=Arm, shape=Pump), alpha=1)+
+  # stat_summary(fun.data = "mean_cl_boot", 
+  #              geom = "errorbar", width = 0.2,  color="black" )+
+  # stat_summary(fun=mean, geom="point",  color="black") + 
+  #geom_point(shape=21)+
+
+ 
+  theme(legend.position = "bottom")+
+  scale_y_continuous(#limits = c(0, 11),
+                      breaks = seq(0,12, 2.5),  
+                      #   expand = c(0.01, 0.01),
+                      name=("NH4 [umol/L]")) +
+  # geom_hline(yintercept = 4.1, linetype=2)+
+  # geom_hline(yintercept = 0.3, linetype=2)+
+  MyTheme +
+  facet_grid(Beaker.conditions~Date, scales = "free_y")
+
+#NH4_plot
+```
+
+
+```{r}
+NH4_genotype<- ggplot(data, aes (Date, NH4)) +
+  geom_boxplot ()+
+  geom_jitter(aes(colour=Genotype, shape=Arm), alpha=1)+
+  # stat_summary(fun.data = "mean_cl_boot", 
+  #              geom = "errorbar", width = 0.2,  color="black" )+
+  # stat_summary(fun=mean, geom="point",  color="black") + 
+  #geom_point(shape=21)+
+
+  theme(legend.position = "bottom")+
+  scale_y_continuous(limits = c(0, 12),
+                      breaks = seq(0,10, 1),  
+                      #   expand = c(0.01, 0.01),
+                      name=("NH4 [umol/L]")) +
+  # geom_hline(yintercept = 4.1, linetype=2)+
+  # geom_hline(yintercept = 0.3, linetype=2)+
+  MyTheme +
+  facet_wrap(Disease~Nutrients, scales = "free_y")
+#NH4_genotype
+```
+
+```{r}
+NH4_Arms<- ggplot(data, aes (Day, NH4)) +
+  #geom_boxplot ()+
+  geom_jitter(aes(colour=Arm, shape=Beaker.conditions), alpha=1)+
+  stat_summary(fun.data = "mean_cl_boot", 
+                geom = "errorbar", width = 0.2,  color="black" )+
+   stat_summary(fun=mean, geom="point",  color="black") + 
+  #geom_point(shape=21)+
+
+  theme(legend.position = "bottom")+
+  geom_vline(xintercept = c(17, 32),
+              linetype=2, alpha=0.5)+
+  scale_x_continuous(limits = c(0, 55),
+                      breaks = seq(0,55, 7),  
+                      #   expand = c(0.01, 0.01),
+                      name=("Days in the experiment")) +
+  scale_y_continuous(limits = c(0, 15),
+                      breaks = seq(0,20, 1),  
+                      #   expand = c(0.01, 0.01),
+                      name=("NH4 [umol/L]")) +
+  # geom_hline(yintercept = 4.1, linetype=2)+
+  # geom_hline(yintercept = 0.3, linetype=2)+
+  MyTheme +
+  facet_wrap(Disease~Nutrients)
+
+#NH4_Arms
+```
+
+Remove VAT and stock solution values 
+
+```{r}
+NH4_Temp<- ggplot(data, aes (Day, NH4, fill=Treatment, 
+                               colour=Treatment,
+                               shape=Beaker.conditions)) +
+ 
+  #geom_jitter(aes(colour=Treatment, shape=Beaker.conditions), 
+  #alpha=1, size =1)+
+  #geom_boxplot ()+
+  scale_shape_manual(values=c(21, 22))+
+  scale_color_manual(values=c("#2b83ba", "#d7191c", "#003399", "#660000",
+                              '#CC9900','#FF33FF', '#FF6600', "#999999"))+
+  scale_fill_manual(values=c("#2b83ba", "#d7191c", "#003399", "#660000",
+                              '#CC9900','#FF33FF', '#FF6600', "#999999"))+
+  # stat_summary(fun.data = "mean_cl_boot", 
+  #               geom = "errorbar", width = 0.2)+
+  stat_summary(fun.data = "mean_cl_boot", 
+                geom = "line")+
+  stat_summary(fun=mean, geom="point") + 
+  #geom_point(shape=21)+
+   geom_vline(xintercept = c(17, 32),
+              linetype=2, alpha=0.5)+
+  scale_x_continuous(limits = c(0, 55),
+                      breaks = seq(0,55, 7),  
+                      #   expand = c(0.01, 0.01),
+                      name=("Day in the experiment")) +
+  scale_y_continuous(#limits = c(0, 60),
+                      breaks = seq(0, 20, 2),  
+                      #   expand = c(0.01, 0.01),
+                      name=("NH4 [umol/L]")) +
+  # geom_hline(yintercept = 4.1, linetype=2)+
+  # geom_hline(yintercept = 0.3, linetype=2)+
+  #ylim()+
+  MyTheme
+  #NH4_Temp+facet_wrap(~Nutrients)
+NH4_Temp+facet_grid(Disease~Nutrients)
+```
+
+
+```{r}
+NH4_W<- ggplot(data, aes (Week, NH4, fill=Treatment, colour=Treatment)) +
+ 
+  geom_jitter(aes(colour=Treatment, shape=Beaker.conditions), 
+              alpha=1, size =1)+
+  geom_boxplot(aes (Week, NH4, fill=Treatment, group=Week))+
+  scale_shape_manual(values=c(21, 22))+
+  scale_color_manual(values=c("#2b83ba", "#d7191c", "#003399", "#660000",
+                              '#CC9900','#FF33FF', '#FF6600', "#999999"))+
+  scale_fill_manual(values=c("#2b83ba", "#d7191c", "#003399", "#660000",
+                              '#CC9900','#FF33FF', '#FF6600', "#999999"))+
+  stat_summary(fun.data = "mean_cl_boot", 
+                geom = "errorbar", width = 0.2)+
+  stat_summary(fun.data = "mean_cl_boot", 
+                geom = "line")+
+  stat_summary(fun=mean, geom="point") + 
+  #geom_point(shape=21)+
+ 
+  theme(legend.position = "bottom")+
+  scale_y_continuous(limits = c(0, 20),
+                      breaks = seq(0,20, 1),  
+                      #   expand = c(0.01, 0.01),
+                      name=("NH4 [umol/L]")) +
+  # geom_hline(yintercept = 4.1, linetype=2)+
+  # geom_hline(yintercept = 0.3, linetype=2)+
+  MyTheme
+  #NH4_Temp+facet_wrap(~Nutrients)
+  NH4_W+facet_grid(Disease~Nutrients)
+```
+
+Remove Stock solution, VAT and donnor tank samples 
+
+```{r}
+Corals<-data[data$Nutrients!="Other", ]
+
+Concentrations <- ddply (Corals, .(Treatment, Disease, Beaker.conditions, Nutrients, Day), summarise,
+                meanNH4 = mean (NH4, na.rm = T), 
+                sdNH4 = sd (NH4, na.rm = T), 
+                seNH4 = std.error (NH4, na.rm = T))
+#Concentrations
+
+Concentrations$Beaker.conditions<-factor(Concentrations$Beaker.conditions, 
+                                            levels=c("Coral", "Blank"))
+Concentrations$Nutrients<-factor(Concentrations$Nutrients, 
+                                            levels=c("LN", "HN"))
+
+write.csv(Concentrations, "Outputs/Concentrations.csv")
+
+# Standard error of the mean
+
+NH4_day<-ggplot(Concentrations, 
+                aes(x=Day, y=(meanNH4), shape=Beaker.conditions, 
+                                    colour=Treatment)) + 
+    geom_errorbar(aes(ymin=(meanNH4-seNH4), ymax=(meanNH4+seNH4)), 
+                  width=.1, position=position_dodge(0.5)) +
+    geom_line(position=position_dodge(0.5)) +
+    geom_point(position=position_dodge(0.5), aes(fill=Treatment), size=1)+
+    scale_shape_manual(values=c(21, 22))+
+    scale_color_manual(values=c("#2b83ba", "#d7191c", "#003399", "#660000"))+
+    scale_fill_manual(values=c("#2b83ba", "#d7191c", "#003399", "#660000"))+
+    geom_vline(xintercept = c(32),
+                linetype=2, alpha=0.5)+
+    scale_x_continuous(#limits = c(0, 55),
+                        breaks = seq(0,55, 8),  
+                        #   expand = c(0.01, 0.01),
+                        name=("Days in the experiment")) +
+    scale_y_continuous(#limits = c(0, 60),
+                        breaks = seq(0, 35, 2.5),  
+                      #   expand = c(0.01, 0.01),
+                      name=("NH4 [uM]")) + MyTheme +
+  facet_grid(Nutrients~Disease)
+NH4_day
+
+#ggsave(file="Outputs/Nutrients.svg", plot=NH4_day, width=7.5, height=5)
+```
+
+Remove empty beakers
+
+```{r}
+Concentrations2 <- ddply (Corals[Corals$Beaker.conditions=="Coral", ],
+                          .(Treatment, Nutrients, Day),
+                         summarise,
+                meanNH4 = mean (NH4, na.rm = T), 
+                sdNH4 = sd (NH4, na.rm = T), 
+                seNH4 = std.error (NH4, na.rm = T))
+#Concentrations2
+
+Concentrations2$Nutrients<-factor(Concentrations2$Nutrients, 
+                                            levels=c("LN", "HN"))
+
+# Standard error of the mean
+
+NH4_day<-ggplot(Concentrations2, 
+                aes(x=Day, y=(meanNH4), 
+                                    colour=Treatment)) + 
+    geom_errorbar(aes(ymin=(meanNH4-seNH4), ymax=(meanNH4+seNH4)), 
+                  width=.1, position=position_dodge(0.5)) +
+    geom_line(position=position_dodge(0.5)) +
+    geom_point(position=position_dodge(0.5), aes(fill=Treatment), size=1)+
+    scale_shape_manual(values=c(21, 22))+
+    scale_color_manual(values=c("#2b83ba", "#d7191c", "#003399", "#660000"))+
+    scale_fill_manual(values=c("#2b83ba", "#d7191c", "#003399", "#660000"))+
+    geom_vline(xintercept = c(1, 32),
+                linetype=2, alpha=0.5)+
+    scale_x_continuous(#limits = c(0, 55),
+                        breaks = seq(0,55, 8),  
+                        #   expand = c(0.01, 0.01),
+                        name=("Days in the experiment")) +
+    scale_y_continuous(#limits = c(0, 60),
+                        breaks = seq(0, 20, 2),  
+                      #   expand = c(0.01, 0.01),
+                      name=("NH4 [uM]")) + MyTheme #+
+  #facet_grid(~Disease)
+NH4_day
+```
+
+# Figure: Experimental conditions 
+
+```{r}
+library(gridExtra)
+experiment<-grid.arrange(TimeLine2, NH4_day, ncol = 2)
+experiment
+
+#ggsave(file="Outputs/Experiment_conditions.svg", plot=experiment, width=8.5, height=4)
+```
+
+## Other figures 
+
+```{r}
+NH4_by_coral<- ggplot(Corals[Corals$Beaker.conditions=="Coral", ],
+                 aes (Day, NH4, fill=Treatment, 
+                               colour=Treatment)) +
+ 
+  geom_jitter(aes(colour=Treatment, shape=Beaker.conditions), 
+              alpha=1, size =0.5)+
+  scale_shape_manual(values=c(21, 22))+
+  scale_color_manual(values=c("#2b83ba", "#d7191c", "#003399", "#660000"))+
+  scale_fill_manual(values=c("#2b83ba", "#d7191c", "#003399", "#660000"))+
+  # stat_summary(fun.data = "mean_cl_boot", 
+  #               geom = "errorbar", width = 0.2)+
+  stat_summary(fun.data = "mean_cl_boot", 
+                geom = "line")+
+  stat_summary(fun=mean, geom="point") + 
+  #geom_point(shape=21)+
+   geom_vline(xintercept = c(17, 32),
+              linetype=2, alpha=0.5)+
+  scale_x_continuous(limits = c(0, 55),
+                      breaks = seq(0,55, 7),  
+                      #   expand = c(0.01, 0.01),
+                      name=("Day in the experiment")) +
+  scale_y_continuous(limits = c(0, 60),
+                      breaks = seq(0, 60, 5),  
+                      #   expand = c(0.01, 0.01),
+                      name=("NH4 [umol/L]")) +
+  MyTheme
+#NH4_Temp+facet_wrap(~Nutrients)
+NH4_by_coral+facet_grid(Disease~Nutrients)
+```
+
+```{r}
+Concentrations <- ddply (data, .(Nutrients, Disease, Date),
+                         summarise,
+                meanNH4 = mean (NH4, na.rm = T), 
+                sdNH4 = sd (NH4, na.rm = T))
+#Concentrations
+
+Concentrations<-Concentrations %>% 
+                mutate_if(is.numeric, round, digits=2)
+
+```
+
+```{r}
+
+Concentrations_Day_Beaker <- ddply (data, .(Nutrients, Day, Beaker.conditions),
+                         summarise,
+                meanNH4 = mean (NH4, na.rm = T), 
+                sdNH4 = sd (NH4, na.rm = T))
+Concentrations_Day_Beaker
+
+Concentrations_Nutrients_Day <- ddply (data, .(Nutrients, Day),
+                         summarise,
+                meanNH4 = mean (NH4, na.rm = T), 
+                sdNH4 = sd (NH4, na.rm = T))
+Concentrations_Nutrients_Day
+
+Concentrations_Nutrients_Week <- ddply (data, .(Nutrients, Week),
+                         summarise,
+                meanNH4 = mean (NH4, na.rm = T), 
+                sdNH4 = sd (NH4, na.rm = T))
+Concentrations_Nutrients_Week
+
+Concentrations<-Concentrations %>% 
+ mutate_if(is.numeric, round, digits=2)
+
+# write.csv(Concentrations, "Outputs/weekly_NH4.csv", row.names = F)
+```
+
+#3. Treatment effects on NH4 concentrations
+
+```{r}
+## model 1: LMER for both species
+  fit1<-lmerTest::lmer(NH4 ~Nutrients * Temp * Disease * Week +
+                         (1|Beaker.conditions), data=data[data$Nutrients!="Other", ])
+  isSingular(fit1)
+  anova(fit1)
+  step(fit1)
+  ranova(fit1)
+  
+  summary(fit1)
+  par(mfrow=c(2,2))
+  plot(fit1)
+  par(mfrow=c(1,1))
+```
+
+```{r}
+#Pairwise comparisons
+Sw.emmc<-multcomp::cld(emmeans(fit1, specs=c("Nutrients", "Disease")))
+Sw.emmc
+```
+
+# Packages used
+
+```{r}
+# Creates bibliography 
+#knitr::write_bib(c(.packages()), "packages.bib")
+```

@@ -1,0 +1,597 @@
+---
+title: "Ofav Symbiodiniaceae community under environmental Co-factors"
+author: "Ana Palacio-Castro"
+date: "`r Sys.Date()`"
+always_allow_html: yes
+output:
+  html_document:
+    code_folding: hide
+    fig_height: 8
+    fig_width: 8
+    df_print: paged
+    toc: yes
+    toc_float: yes
+  pdf_document:
+    toc: yes
+  word_document:
+    toc: yes
+bibliography: packages.bib
+nocite: '@*'
+editor_options:
+  chunk_output_type: console
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+# 1. Libraries and project set-up:
+
+```{r libraries}
+  library(tidyverse) # install.packages('tidyverse')
+  #library(devtools)  # install.packages("devtools")
+  #devtools::install_github("jrcunning/steponeR")
+  #install.packages("rlang")
+  library(steponeR)
+  library(plyr)
+  library(dplyr)
+  library(reshape2)
+  library(ggplot2)
+  library(ggpubr)
+
+  library(lmerTest)
+  library(emmeans)
+  library(effects)
+  library(modelsummary) # model results in table
+  # library(lsmeans) #cld functon 
+  #library(jtools) # Plot modesl
+  library(kableExtra) # ANOVA tables
+
+MyTheme<-theme_bw() +  
+theme(legend.position="top",
+          plot.background=element_blank(),
+          #axis.text.x = element_text(angle = 90, vjust = 0.5),
+          panel.grid.major.y = element_blank(),
+          panel.grid.major.x = element_blank(),
+          panel.grid.minor.x = element_blank(),
+          panel.grid.minor.y = element_blank(),
+          legend.box.background = element_rect(),
+          legend.title = element_blank(),
+          panel.background =element_rect(fill = NA, 
+                                         color = "black"))#
+
+Fill.colour<-c ("#2b83ba", "#003399", "#d7191c", "#660000")
+
+Treat_colour<-scale_colour_manual(values =
+                           c("#2b83ba", "#003399",
+                             "#d7191c", "#660000"))
+```
+
+
+# 2. Calculate qPCR RATIOS fo all the samples  
+
+```{r CalculateRatios, include=FALSE}
+
+# Get the list of files with qPCR data
+Plates <- list.files(path="Data", pattern=".csv", full.names=T)
+Plates
+
+# Run the steponeR program to get the S/H cell ratios
+  # This needs to follow your plate target labels, otherwise it will not work
+
+Ofav.Out <- steponeR(files=Plates, target.ratios=c("A.Ofav", "B.Ofav", "D.Ofav"), 
+                     fluor.norm=list(A=0, B=0, D=0, Ofav=0),
+                     copy.number=list(A=1, B=1, D=3, Ofav=1),
+                     ploidy=list(A=1, B=1, D=1, Ofav=2),
+                     extract=list(A=0.813, B=0.813, D=0.813, Ofav=0.982))
+
+# Target ratio results
+Ofav<-Ofav.Out$result
+```
+
+## 2.1. Data CLEANING A
+
+```{r DataCleaning}
+  # 1. Check and remove NTC wells
+    ntc <- Ofav[which(Ofav$Sample.Name=="NTC"), ]
+    Ofav <- droplevels(Ofav[!rownames(Ofav) %in% rownames(ntc), ])
+    
+  # 2. Check and remove + Control wells
+    Positive <- Ofav[which(Ofav$Sample.Name=="+"), ]
+    Ofav <- droplevels(Ofav[!rownames(Ofav) %in% rownames(Positive), ])
+
+  # 3.If Clade only detected in one technical replicate, set its ratio to NA and make them =0
+    One.A<- Ofav[which(Ofav$A.reps==1),]
+    Ofav$A.Ofav[which(Ofav$A.reps==1)] <- NA
+    
+    One.B<- Ofav[which(Ofav$B.reps==1),]
+    Ofav$B.Ofav[which(Ofav$B.reps==1)] <- NA
+    
+    One.D<- Ofav[which(Ofav$D.reps==1),]
+    Ofav$D.Ofav[which(Ofav$D.reps==1)] <- NA
+    
+    Ofav$A.Ofav[is.na(Ofav$A.Ofav)] <- 0
+    Ofav$B.Ofav[is.na(Ofav$B.Ofav)] <- 0
+    Ofav$D.Ofav[is.na(Ofav$D.Ofav)] <- 0
+```
+
+## 2.2. Get the total S/H cell ratios and log 10 transformations
+
+```{r}
+  # Total SH
+    Ofav$TotalSH<-(Ofav$A.Ofav + Ofav$B.Ofav+ Ofav$D.Ofav)
+    
+  # Log 10
+        Ofav$logA.SH <- log10(Ofav$A.Ofav)
+        Ofav$logB.SH <- log10(Ofav$B.Ofav)
+        Ofav$logD.SH <- log10(Ofav$D.Ofav)
+        Ofav$logSH<-log10(Ofav$TotalSH)
+        
+        Ofav$logA.SH[which(Ofav$A.Ofav==0)] <- NA
+        Ofav$logB.SH[which(Ofav$B.Ofav==0)] <- NA
+        Ofav$logD.SH[which(Ofav$D.Ofav==0)] <- NA
+        Ofav$logSH[which(Ofav$TotalSH==0)] <- NA
+  
+```    
+
+## 2.3. Import the sample information
+
+```{r Samples}
+# Get the sample information for your qPCR plates (if you use a template)
+  SampleName<-read.csv("Metadata/Sample_Plates.csv")
+  SampleName <- SampleName[!(is.na(SampleName$Sample.ID)), ]
+  SampleName <- SampleName[SampleName$Fragment!="Acropora", ]
+  SampleName<-SampleName[, -(12:37)]
+  
+# Get the sample metadata (treatments, data points, etc)
+  Metadata<-read.csv("Metadata/Fragment_Replicate.csv")
+
+# Get the disease outcome information
+  Disease<-read.csv("Metadata/SCTLD_mortality.csv")
+  Disease<-select(Disease, Disease_Status, Fragment, Start_Of_Lesion)
+
+  #Sample.duplicates <-SampleName[duplicated(SampleName$Sample.Plate),] 
+  
+# 3. Create unique sample ID+FileName to relabel samples  
+  Ofav$Sample.Plate<-paste(Ofav$Sample.Name, Ofav$File.Name, sep = "_" )
+  head(SampleName)
+  head(Ofav)
+   
+# Replace Sample.Names in qPCR data - Different for each project
+rownames(SampleName) <- SampleName$Sample.Plate
+    Ofav$TP<-SampleName[as.character(Ofav$Sample.Plate), "TP"]
+    Ofav$Status<-SampleName[as.character(Ofav$Sample.Plate), "Status"]
+    Ofav$Date<-SampleName[as.character(Ofav$Sample.Plate), "Date"]
+    Ofav$Date<-as.Date(Ofav$Date, format="%Y-%m-%d")
+    Ofav$Fragment<-SampleName[as.character(Ofav$Sample.Plate), "Fragment"]
+    Ofav$Sample.ID<-SampleName[as.character(Ofav$Sample.Plate), "Sample.ID"]
+    
+# Get treatment information
+  Ofav<-left_join(Ofav, Metadata, by="Fragment")
+
+# Creates a unique ID for a core-sampling time 
+  Ofav$Sample<-paste(Ofav$Fragment, Ofav$TP, Ofav$Status, sep='_')
+  
+# Remove non experimental corals
+  Donors <- Ofav[is.na(Ofav$Nutrients), ]
+  Ofav <- droplevels(Ofav[!rownames(Ofav) %in% rownames(Donors), ])
+
+# Environmental
+  Ofav$N_T<-paste(Ofav$Nutrients, as.character(Ofav$Temp), sep="_")
+  
+# Disease information
+   Ofav<-left_join(Ofav, Disease, by="Fragment")
+  Ofav <- Ofav[Ofav$TP!="T3", ]
+  
+  Lession_T2<-select(Ofav, Fragment, Disease_Status)
+  Lession_T2<- unique(Lession_T2)
+  colnames(Lession_T2)<-(c("Fragment", "Status_T2"))
+  Ofav<-left_join(Ofav, Lession_T2, by="Fragment")
+  Ofav$Status_T2<-Ofav$Status_T2 %>% replace_na("ND")
+```
+
+## 2.4. Data CLEANING B
+
+```{r DataCleaningB}
+
+# 5. Remove (-) control
+    #NegControl <- Ofav[which(Ofav$Sample=="NA_NA"), ]
+    #Ofav <- droplevels(Ofav[!rownames(Ofav) %in% rownames(NegControl), ])
+
+# 6.If coral detected in one technical replicate, remove the sample
+    ReRun.Coral <- Ofav[which(Ofav$Ofav.reps==1), ]
+    Ofav <- droplevels(Ofav[!rownames(Ofav) %in% rownames(ReRun.Coral), ])
+    
+    NoHSratio <- Ofav[which(Ofav$TotalSH==0), ]
+    Ofav <- droplevels(Ofav[!rownames(Ofav) %in% rownames(NoHSratio), ])
+    
+# 7. High ST    
+    StDe1.5 <- Ofav[which((Ofav$Ofav.CT.sd>1.5)|(Ofav$D.CT.sd>1.5)), ]
+    Ofav <- droplevels(Ofav[!rownames(Ofav) %in% rownames(StDe1.5), ])
+  
+# 8.Suspiciously late coral amplification
+    # Histo_Ofav_CT<-qplot(Ofav.CT.mean, data=Ofav, binwidth=0.15)
+    # Histo_Ofav_CT 
+  
+  LateCoral<-Ofav[which(Ofav$Ofav.CT.mean>22), ]
+  Ofav <- droplevels(Ofav[!rownames(Ofav) %in% rownames(LateCoral), ])
+    
+  # Samples to Re-run    
+  ToRe_Run1<-rbind(ReRun.Coral, NoHSratio)
+  ToRe_Run1<-rbind(ToRe_Run1, ReRun.Coral)   
+  ToRe_Run1<-rbind(ToRe_Run1, StDe1.5)
+  ToRe_Run1<-rbind(ToRe_Run1, LateCoral)
+  ToRe_Run1<-ToRe_Run1 %>% distinct()
+```
+  
+## 2.5. Chose bw samples ran more than once
+
+```{r remove duplicates}
+
+ ReRunA <- Ofav[duplicated(Ofav$Sample),] 
+  n_RunA <- data.frame(table(Ofav$Sample))
+  colnames(n_RunA)<-c("Sample","RanA")
+  Ofav<-join(Ofav, n_RunA, type = "left")
+# 
+  DuplicatesA <- Ofav[(Ofav$RanA>1),]
+  # write.csv(DuplicatesA, "DuplicatesA.csv")
+
+Duplicates<-ggplot(DuplicatesA, aes(Date, logSH, colour=factor(File.Name))) +
+ stat_summary(fun=mean, geom="line") +
+  geom_point() 
+Duplicates
+```
+
+##2.6. Remove duplicates
+
+```{r remove duplicates2}
+#List of dupilcates to remove  
+ToRem1<-read.csv("ToRemove.csv")
+Ofav<-Ofav[!(Ofav$Sample.Plate %in% ToRem1$Sample.Plate),]
+# 
+# # Check for replicates again--should have none
+  n_RunB <- data.frame(table(Ofav$Sample))
+  colnames(n_RunB)<-c("Sample","RanB")
+  Ofav<-join(Ofav, n_RunB, type = "left")
+
+# 
+# # List of dupplicated samples, should have 0 rows now -->
+   DuplicatesB <- Ofav[(Ofav$RanB>1),]
+# # write.csv(DuplicatesB, file = 'DuplicatesB.csv')
+```
+
+```{r DProp, include=FALSE}
+
+# Clade Proportion
+  # D Proportion
+  Ofav$D.Prp<-(Ofav$D.Ofav/Ofav$TotalSH)
+  Ofav$A.Prp<-(Ofav$A.Ofav/Ofav$TotalSH)
+  Ofav$B.Prp<-(Ofav$B.Ofav/Ofav$TotalSH)
+  
+  hist(Ofav$D.Prp)
+  hist(Ofav$A.Prp)
+  hist(Ofav$B.Prp)
+  
+  Ofav$D.per<-(Ofav$D.Prp*100)
+  Ofav$A.per<-(Ofav$A.Prp*100)
+  Ofav$B.per<-(Ofav$B.Prp*100)
+```
+  
+## 3. Exploratory plots
+
+## Samples before disease inoculation
+
+```{r}
+# Order factors
+  Ofav$N_T<-factor(Ofav$N_T, levels = c("LN_28", "HN_28", "LN_31", "HN_31"))
+  
+# Initial data
+  T1<-Ofav[Ofav$TP=="T1", ]
+  T1<-T1[T1$Sample!="D_868_T1_AH", ]
+  T1$RanA<-NULL
+  T1$RanB<-NULL
+```
+
+```{r}
+Dprop_Hist_T1 <- ggplot(T1, aes (D.Prp, fill=as.factor(N_T))) +
+      geom_histogram(binwidth = 0.01) + 
+      scale_x_continuous(name= expression(Proportion~of~italic(Durusdinium~trenchii)),
+                         breaks=seq(0, 1, 0.01)) +
+      scale_y_continuous(name= expression(Number~of~italic(O.faveolata)~fragments),
+                         breaks=seq(0, 90, 10)) +
+      theme(plot.background=element_blank(),
+                         panel.grid.major.y = element_blank(),
+                         panel.grid.major.x = element_blank(),
+            legend.position=c(0.2,0.8),
+                            legend.box.background = element_rect(), 
+            panel.background =element_rect(fill = NA, color = "black")) +
+      scale_fill_manual(values=Fill.colour,
+                    name = "Treatment"# , 
+                    #labels=c("C dominated", "D dominated")
+                    )
+Dprop_Hist_T1 + facet_grid(~Disease)
+
+Aprop_Hist_T1 <- ggplot(T1, aes (A.Prp, fill=as.factor(Genotype))) +
+      geom_histogram(binwidth = 0.01) + facet_wrap(~Nutrients) + 
+      scale_x_continuous(name= expression(Proportion~of~italic(Durusdinium~trenchii)),
+                         breaks=seq(0, 1, 0.01)) +
+      scale_y_continuous(name= expression(Number~of~italic(O.faveolata)~fragments),
+                         breaks=seq(0, 90, 10)) +
+      theme(plot.background=element_blank(),
+                         panel.grid.major.y = element_blank(),
+                         panel.grid.major.x = element_blank(),
+            legend.position=c(0.2,0.8),
+                            legend.box.background = element_rect(), 
+            panel.background =element_rect(fill = NA, color = "black"))
+Aprop_Hist_T1 + facet_grid(Nutrients~Disease)
+```
+
+# 4. Final plots and stats 
+
+## 4.1 Symbiont to host cell ratio
+
+```{r}
+S_H_T1 <- ggplot(T1[T1$Disease=="SCTLD", ],
+                 aes (x=Genotype, y=TotalSH, fill=as.factor(N_T))) +
+     #geom_point(aes(fill=N_T, shape=Genotype), position=position_dodge(width=0.6), alpha=0.5)+
+     stat_summary(fun.data = "mean_cl_boot", aes(fill=as.factor(N_T)),
+                  linewidth = 1, size = 1, shape=21, alpha=0.8, 
+                  position=position_dodge(width=0.6))+
+      #scale_y_log10() +
+     scale_y_continuous(#breaks=seq(0, 1, 0.002),
+                        name=expression(log[10]~(S/H)~cell~ratio)) +
+     theme(plot.background=element_blank(),
+                         panel.grid.major.y = element_blank(),
+                         panel.grid.major.x = element_blank(),
+          legend.position="bottom",
+                            legend.box.background = element_rect(), 
+          panel.background =element_rect(fill = NA, color = "black")) +
+    scale_fill_manual(values=Fill.colour,
+                    #labels=c("C dominated", "D dominated")
+                    name = "Treatment")+
+    scale_shape_manual(values=c(23, 21, 24),
+                      #labels=c("Control", "SCTLD"),
+                      name = "Transmission")+
+    guides(fill=guide_legend(override.aes = list(shape=21)))
+S_H_T1
+
+S_H_T1 <- ggplot(T1[T1$Disease=="SCTLD", ],
+                 aes (x=N_T, y=TotalSH, fill=as.factor(N_T))) +
+     geom_point(aes(colour=N_T, shape=Genotype), position=position_dodge(width=0.6), 
+                alpha=0.5)+
+     stat_summary(fun.data = "mean_cl_boot", aes(fill=as.factor(N_T)),
+                  linewidth = 1, size = 1, shape=21, alpha=0.8, 
+                  position=position_dodge(width=0.6))+
+     Treat_colour+ 
+     scale_y_continuous(breaks=seq(0.05, 0.25, 0.05),
+                        name="Relative symbiont abundance (S/H cell ratio)") +
+     theme(plot.background=element_blank(),
+                         panel.grid.major.y = element_blank(),
+                         panel.grid.major.x = element_blank(),
+          legend.position="bottom",
+                            legend.box.background = element_rect(), 
+          panel.background =element_rect(fill = NA, color = "black")) +
+    scale_fill_manual(values=Fill.colour,
+                    #labels=c("C dominated", "D dominated")
+                    name = "Treatment")+
+    scale_shape_manual(values=c(23, 25, 24),
+                      labels=c("A", "B", "C"),
+                      name = "Colony")+
+    guides(fill=guide_legend(override.aes = list(shape=21)))
+S_H_T1
+```
+
+S/H model
+
+```{r}
+LM_SH_0 <- lmer(logSH ~ Nutrients + Temp +
+                             (1|Colony), REML=TRUE, data=T1[T1$Disease=="SCTLD", ])
+  step(LM_SH_0)
+  anova(LM_SH_0)
+  #summary(LM_SH_0)
+  ranova(LM_SH_0)
+
+LM_SH_1 <- lmer(logSH ~ Nutrients + (1 | Colony), REML=TRUE,
+                data=T1[T1$Disease=="SCTLD", ])
+  step(LM_SH_1)
+  summary(LM_SH_1)
+  anova(LM_SH_1)
+
+# ANOVAs
+    # Convert ANOVA results into dataframes allows for easier name manipulation
+    av.LM_SH_0 <- data.frame (anova(LM_SH_0))
+    av.LM_SH_1 <- data.frame (anova(LM_SH_1))
+    
+    # Putting all into one dataframe/table
+    anova_SH <- data.frame(cbind
+                    (c("Nutrients", "Temperature"), 
+                         rbind(av.LM_SH_0))) 
+    colnames(anova_SH) <- c("", "Sum Sq", "Mean Sq", "N Df" , "D Df",
+                                     "F value", "Pr(>F)")
+    row.names(anova_SH) <- NULL
+
+    # create HTML table using kableExtra
+    anova_SH %>% kable("html", digits=4,  caption = 'S/H cell ratio model') %>% 
+    kable_styling(bootstrap_options = "striped", full_width = F)
+
+# Model summary  
+  SH_models<-list("Initial" = LM_SH_0, 
+                   "Final" = LM_SH_1)
+  modelsummary(SH_models, stars = TRUE, 
+             #statistic = c('std.error', 'p.value', 'conf.int'),
+             title = 'S/H cell ratio model outputs')
+  
+# Mean values
+  SH_Colony_summary <- T1 %>%
+    dplyr::group_by(Genotype) %>%
+    dplyr::summarise(
+      MeanSH = mean(TotalSH, na.rm = T),
+      SD = sd(TotalSH, na.rm = T))
+  SH_Colony_summary
+  #write.csv(SH_Colony_summary, "Outputs/SH_Colony.csv")
+  
+  SH_nutrients_summary <- T1 %>%
+    dplyr::group_by(Nutrients) %>%
+    dplyr::summarise(
+      MeanSH = mean(TotalSH, na.rm = T),
+      SD = sd(TotalSH, na.rm = T))
+  SH_nutrients_summary
+  #write.csv(SH_nutrients_summary, "Outputs/SH_Nutrients.csv")
+```
+
+
+## 4.2 *Durusdinium* relative abundance
+
+```{r}
+Dprop_T1 <- ggplot(T1[T1$Disease=="SCTLD", ],
+                   aes (x=Genotype, y=D.Prp*100, fill=as.factor(N_T))) +
+    geom_point(aes(fill=N_T, shape=Status_T2), position=position_dodge(width=0.6))+
+    scale_y_continuous(name=italic(Durusdinium)~"(%)",
+                         breaks=seq(0, 100, 0.2),
+                         limits = c(99.1, 100)) +
+    stat_summary(fun.data = "mean_cl_boot", aes(fill=as.factor(N_T)),
+                   linewidth = 1, size = 1,alpha=0.8, 
+                   shape=21,position=position_dodge(width=0.6))+
+    theme(plot.background=element_blank(),
+                         panel.grid.major.y = element_blank(),
+                         panel.grid.major.x = element_blank(),
+                         legend.position="bottom",
+                         legend.box.background = element_rect(), 
+                         panel.background =element_rect(fill = NA, color = "black")) +
+      scale_fill_manual(values=Fill.colour,
+                    name = "Treatment"# , 
+                    #labels=c("C dominated", "D dominated")
+                    )+
+      scale_shape_manual(values=c(23, 21, 24),
+                      #labels=c("Control", "SCTLD"),
+                      name = "Lession")+
+      guides(fill=guide_legend(override.aes = list(shape=21)))
+#Dprop_T1
+
+Dprop_T1 <- ggplot(T1[T1$Disease=="SCTLD", ],
+                   aes (x=N_T, y=D.Prp*100, fill=as.factor(N_T))) +
+    geom_point(aes(colour=N_T, shape=Colony), 
+               position=position_dodge(width=0.6), alpha=0.5)+
+    scale_y_continuous(name=italic(Durusdinium)~"(%)",
+                         breaks=seq(0, 100, 0.2),
+                         limits = c(99.1, 100)) +
+    stat_summary(fun.data = "mean_cl_boot", aes(fill=as.factor(N_T)),
+                   linewidth = 1, size = 1,alpha=0.8, 
+                   shape=21,position=position_dodge(width=0.6))+
+    theme(plot.background=element_blank(),
+                         panel.grid.major.y = element_blank(),
+                         panel.grid.major.x = element_blank(),
+                         legend.position="bottom",
+                         legend.box.background = element_rect(), 
+                         panel.background =element_rect(fill = NA, color = "black")) +
+      scale_fill_manual(values=Fill.colour, name = "Treatment")+
+      Treat_colour+ 
+      scale_shape_manual(values=c(23, 25, 24),
+                      #labels=c("Control", "SCTLD"),
+                      name = "Lession")+
+      guides(fill=guide_legend(override.aes = list(shape=21)))
+Dprop_T1
+```
+
+*Durusdinium* models 
+
+```{r}
+# Fit a binomial regression model
+BM_DP <- glm(D.Prp ~ Nutrients + Temp, 
+               family="binomial", data=Ofav)
+    anova(BM_DP)
+    summary(BM_DP)
+    #plot(BM_DP)
+    step(BM_DP)
+    
+LM_DP  <- lmer(D.Prp ~ Nutrients + Temp + (1|Colony), data=Ofav)
+    anova(LM_DP)
+    summary(LM_DP)
+    #plot(LM_DP)
+    step(LM_DP)
+
+# Multicomp
+D.p_Emm<-multcomp::cld(emmeans(LM_DP, specs = c("Temp", "Nutrients")))
+  D.p_Emm
+  #write.csv(D.p_Emm, "Outputs/Dpr_Emmeans.csv")
+```
+
+```{r}
+Aprop_T1 <- ggplot(T1[T1$Disease=="SCTLD", ],
+                   aes (x=Genotype, y=A.Prp*100, fill=as.factor(N_T))) +
+    geom_point(aes(fill=N_T, shape=Status_T2), position=position_dodge(width=0.6))+
+    scale_y_continuous(name=italic(Symbiodinium)~"(%)",
+                         limits = c(0, 0.9),
+                         breaks=seq(0, 100, 0.2)) +
+    stat_summary(fun.data = "mean_cl_boot", aes(fill=as.factor(N_T)),
+                   linewidth = 1, size = 1, alpha=0.8, 
+                   shape=21, position=position_dodge(width=0.6))+
+    theme(plot.background=element_blank(),
+          panel.grid.major.y = element_blank(),
+          panel.grid.major.x = element_blank(),
+          legend.position="bottom",
+          legend.box.background = element_rect(), 
+          panel.background =element_rect(fill = NA, color = "black")) +
+    scale_fill_manual(values=Fill.colour,
+                    name = "Treatment"# , 
+                    #labels=c("C dominated", "D dominated")
+                    )+
+    scale_shape_manual(values=c(23, 21, 24),
+                      #labels=c("Control", "SCTLD"),
+                      name = "Lession")+
+    guides(fill=guide_legend(override.aes = list(shape=21)))
+Aprop_T1
+
+Aprop_T1 <- ggplot(T1[T1$Disease=="SCTLD", ],
+                   aes (x=N_T, y=A.Prp*100, fill=as.factor(N_T))) +
+    geom_jitter(aes(colour=N_T, shape=Genotype), position=position_dodge(width=0.6),
+                alpha=0.5)+
+    scale_y_continuous(name=italic(Symbiodinium)~"(%)",
+                         limits = c(0, 0.9),
+                         breaks=seq(0, 100, 0.2)) +
+    stat_summary(fun.data = "mean_cl_boot", aes(fill=as.factor(N_T)),
+                   linewidth = 1, size = 1, alpha=0.8, 
+                   shape=21, position=position_dodge(width=0.6))+
+    theme(plot.background=element_blank(),
+          panel.grid.major.y = element_blank(),
+          panel.grid.major.x = element_blank(),
+          legend.position="bottom",
+          legend.box.background = element_rect(), 
+          panel.background =element_rect(fill = NA, color = "black")) +
+    scale_fill_manual(values=Fill.colour,
+                    name = "Treatment"# , 
+                    #labels=c("C dominated", "D dominated")
+                    )+
+   Treat_colour+ 
+    scale_shape_manual(values=c(23, 25, 24),
+                      #labels=c("Control", "SCTLD"),
+                      name = "Lession")+
+    guides(fill=guide_legend(override.aes = list(shape=21)))
+Aprop_T1
+
+LM_AP  <- lmer(A.Prp ~ Nutrients + Temp + (1|Colony), data=Ofav)
+    anova(LM_AP)
+    ranova(LM_AP)
+    summary(LM_AP)
+    #plot(LM_AP)
+    step(LM_AP)
+
+A.p_Emm<-multcomp::cld(emmeans(LM_AP, specs = c("Temp", "Nutrients")))
+A.p_Emm
+#write.csv(A.p_Emm, "Outputs/Apr_Emmeans.csv")
+```
+
+```{r}
+Figure5 <- ggarrange(S_H_T1, ggarrange(Dprop_T1 + theme(legend.position = "none"), 
+                                       Aprop_T1+ theme(legend.position = "none"),
+                                       nrow = 2), ncol = 2)
+Figure5
+#ggsave("Outputs/Figure5.svg", Figure5, width=7, height=5,dpi = 300)
+```
+
+# Packages used
+
+```{r}
+# Creates bibliography 
+#knitr::write_bib(c(.packages()), "packages.bib")
+```

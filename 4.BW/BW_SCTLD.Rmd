@@ -1,0 +1,234 @@
+---
+title: "Ofav BW environmental Co-factors and SCTLD"
+author: "Ana Palacio-Castro"
+date: "`r Sys.Date()`"
+output:
+  pdf_document:
+    toc: yes
+  word_document:
+    toc: yes
+  html_document:
+    code_folding: hide
+    fig_height: 6
+    fig_width: 6
+    df_print: paged
+    toc: yes
+    toc_float: yes
+bibliography: packages.bib
+nocite: '@*'
+editor_options:
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning=FALSE, message=FALSE) 
+                      #fig.width=4, fig.height=3 )
+```
+
+# General project set-up 
+
+```{r libraries, results="hide"}
+
+# Libraries
+  library(reshape2)
+  library(tidyverse)
+# Libraries for stats
+  library(lme4)
+  library(multcomp)
+  library(multcompView)
+  library(emmeans)
+  library(effects)
+  library(lmerTest)
+
+# Plots
+MyTheme<-theme_bw() +  
+theme(legend.position="top",
+          plot.background=element_blank(),
+          #axis.text.x = element_text(angle = 90, vjust = 0.5),
+          panel.grid.major.y = element_blank(),
+          panel.grid.major.x = element_blank(),
+          panel.grid.minor.x = element_blank(),
+          panel.grid.minor.y = element_blank(),
+          legend.box.background = element_rect(),
+          legend.title = element_blank(),
+          panel.background =element_rect(fill = NA, 
+                                         color = "black"))
+
+Treat_fill<-scale_fill_manual(values =
+                           c("#2b83ba", "#003399",
+                             "#d7191c", "#660000"))
+
+Treat_colour<-scale_colour_manual(values =
+                           c("#2b83ba", "#003399",
+                             "#d7191c", "#660000"))
+    
+# Data    
+  # Fragment list
+  CurrentFragments<-read.csv("Metadata/Fragment_Replicate.csv", header = T)
+```
+
+# Organized data
+
+After data manipulation
+
+```{r}
+
+# Long (processed) data
+Corrected_long<-read.csv("Long_data_Growth.csv")
+  n_RunB <- data.frame(table(Corrected_long$Fragment))
+  colnames(n_RunB)<-c("Fragment","Samples")
+
+Corrected_long<-dplyr::left_join(Corrected_long, CurrentFragments, by ="Fragment")
+
+Corrected_long$N_T<-factor(paste(Corrected_long$Nutrients, Corrected_long$Temp, sep = "_"))
+Corrected_long<-Corrected_long %>% drop_na(Temp, Nutrients)
+Corrected_long$N_T<-factor(Corrected_long$N_T, levels = c("LN_28", "HN_28", "LN_31", "HN_31"))
+
+Corrected_long$Date<-as.Date(Corrected_long$Date)
+
+Corrected_long <- subset(Corrected_long, Corrected_long$Fragment!='A_324')
+Corrected_long <- subset(Corrected_long, Corrected_long$Fragment!='C_513')
+
+
+summary(Corrected_long)
+#write.csv(Corrected_long, "Corrected_long3.csv", row.names = FALSE)
+
+```
+
+## Check data 
+
+```{r}
+BW_rep<- ggplot(Corrected_long, aes (Date, Mass..g., colour=factor(Fragment))) +
+  geom_line() + 
+  geom_point()+
+  MyTheme+
+  theme(legend.position = "none")
+BW_rep + facet_grid (Nutrients~Temp) 
+
+BW_rep<- ggplot(Corrected_long, aes (Date, Growth..mg.g.d., colour=factor(Fragment))) +
+  geom_line() + 
+  geom_point()+
+  MyTheme+
+  theme(legend.position = "none")
+BW_rep + facet_grid (Nutrients~Temp) 
+```
+
+## Relative growth
+
+```{r}
+
+BW<- ggplot(Corrected_long[Corrected_long$TP!="T0", ], 
+            aes (Genotype, Growth..mg.g.d., colour=factor(N_T))) + 
+      MyTheme + Treat_fill+Treat_colour+
+      stat_summary(fun.data = "mean_cl_boot",geom = "errorbar",
+               width = 0.2, position=position_dodge(width=0.2))+
+      stat_summary(fun.y=mean, geom="point", 
+                position=position_dodge(width=0.2), size =2, alpha=1) +
+      stat_summary(fun.y=mean, geom="line",  position=position_dodge(width=0.2)) + 
+      #geom_point(position=position_dodge(width=0.2))+
+      
+      #scale_x_continuous(name="Days", 
+       #                  breaks = seq(0, 30, by=15)) +
+      scale_y_continuous(name="Growth (mg / g d)", 
+                       breaks = seq(-1, 2, by=0.5)) +
+    theme(legend.position="top",
+        legend.title = element_blank(), 
+        strip.background =element_rect(fill=NA)) +
+  facet_wrap(~TP)
+BW
+
+BW_Trea<- ggplot(Corrected_long[Corrected_long$TP!="T0", ], 
+                  aes (TP, Growth..mg.g.d., colour=factor(N_T))) +
+  Treat_fill+
+  Treat_colour+
+  #geom_point(aes(fill=N_T), shape=21, alpha=0.1)+
+  stat_summary(fun.data = "mean_cl_boot",geom = "errorbar",
+               width = 0.2, position=position_dodge(width=0.3))+
+  stat_summary(fun.y=mean, geom="point", 
+                position=position_dodge(width=0.3), size =2, alpha=1) +
+  stat_summary(fun.y=mean, geom="line",  position=position_dodge(width=0.3)) + 
+  MyTheme + facet_grid(~Genotype)
+ #BW_Trea
+```
+
+# Stats
+
+```{r, normality}
+
+outliers_ofav <- boxplot(Corrected_long$Growth..mg.g.d., plot=T)$out # 1 outlier
+
+# Shapiro test, p-values below 0.05 indicate violations of normality assumptions
+shapiro.test(Corrected_long$Growth..mg.g.d.)
+# normal
+```
+
+# Model selection 
+
+```{r StatsForTreattmentandTime}
+
+# More complex model
+AW_1 <- lmer(Growth..mg.g.d. ~ TP * Nutrients * Temp +
+                             (1|Genotype/Fragment), REML=TRUE, data=Corrected_long)
+
+step(AW_1)
+```
+
+# Final model
+
+```{r}
+# Final model
+AM_1 <- lmer(Growth..mg.g.d. ~ Nutrients +  Temp + TP +(1 | Genotype),
+             data=Corrected_long)
+    summary(AM_1)
+    
+    layout(matrix(1:4,2,2))
+    plot(AM_1)
+    plot(Effect(c("Nutrients","TP"), AM_1), x.var="TP", multiline=T, ci.style="bars")
+```
+
+**Table S3:** Generalized linear mixed models used to test for differences in the growth rates (mg g-1 d-1) of corals exposed to temperature and nutrient treatments. Each model included nutrient and temperature as well as time point as interacting fixed effects, and coral colony as random effects.
+
+```{r}
+anova(AM_1)
+ranova(AM_1)
+```
+
+**Table S4:** Estimated growth rates (mg g-1 d-1) for corals exposed to temperature and nutrient treatments. Pairwise comparisons between groups were obtained using Tukey’s HSD test (α = 0.05). Degrees of freedom are calculated with the Kenward-roger method. Confidence level used: 0.95. Non-overlapping Tukey groups denote significant differences among two given mean values. Results are averaged over the levels of Temperature.  
+
+
+```{r}
+#  Pair-wise comparisons
+BW_Emm<-cld(emmeans(AM_1, specs = c("Nutrients", "TP")))
+BW_Emm
+write.csv(BW_Emm, "Outputs/BW_Emmeans.csv")
+```
+
+# Final figure 
+
+```{r}
+BW_Trea<- ggplot(Corrected_long[Corrected_long$TP!="T0", ], 
+                  aes (TP, Growth..mg.g.d., colour=factor(N_T))) +
+  Treat_fill+
+  Treat_colour+
+  #geom_point(aes(fill=N_T), shape=21, alpha=0.1)+
+  stat_summary(fun.data = "mean_cl_boot",geom = "errorbar",
+               width = 0.2, position=position_dodge(width=0.3))+
+  stat_summary(fun.y=mean, geom="point", 
+                position=position_dodge(width=0.3), size =2, alpha=1) +
+  stat_summary(fun.y=mean, geom="line",  position=position_dodge(width=0.3)) + 
+  MyTheme
+  # scale_x_date(date_breaks = "1 week", 
+  #              date_labels = "%b/%d")+
+BW_Trea 
+
+#ggsave("Outputs/BW_Trea.svg", BW_Trea, width=3, height=3,dpi = 300)
+```
+
+*Figure 4b*: Text
+
+# Packages used
+
+```{r}
+# Creates bibliography 
+#knitr::write_bib(c(.packages()), "packages.bib")
+```

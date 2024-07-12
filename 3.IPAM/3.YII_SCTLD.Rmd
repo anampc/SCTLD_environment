@@ -1,0 +1,318 @@
+---
+title: "Ofav YII environmental Co-factors and SCTLD"
+author: "Ana Palacio-Castro"
+date: "`r Sys.Date()`"
+output:
+  pdf_document:
+    toc: yes
+  html_document:
+    code_folding: hide
+    fig_height: 8
+    fig_width: 8
+    df_print: paged
+    toc: yes
+    toc_float: yes
+bibliography: packages.bib
+nocite: '@*'
+editor_options:
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning=FALSE, message=FALSE) 
+                      #fig.width=4, fig.height=3 )
+```
+
+# Libraries and settings
+
+```{r, include=FALSE}
+# Libraries
+    library(plyr)
+    library(tidyverse)
+    library(reshape2)
+    library(lubridate)
+    library(knitr)
+    library(dplyr)
+    library(broom)
+
+#Plots
+    library(ggpubr)
+    library(ggthemes)
+    library(gridExtra)
+    library(ggExtra)
+    library(colorspace)
+    
+#Models     
+    library(plotrix)
+    library(lmodel2)    
+    library(lmerTest)
+    library(emmeans)
+    library(effects)
+    library(modelsummary) # model results in table
+    # library(lsmeans) #cld functon 
+    #library(jtools) # Plot modesl
+    library(kableExtra) # ANOVA tables
+
+# Plots
+MyTheme<-theme_bw() +  
+theme(legend.position="top",
+          plot.background=element_blank(),
+          #axis.text.x = element_text(angle = 90, vjust = 0.5),
+          panel.grid.major.y = element_blank(),
+          panel.grid.major.x = element_blank(),
+          panel.grid.minor.x = element_blank(),
+          panel.grid.minor.y = element_blank(),
+          legend.box.background = element_rect(),
+          legend.title = element_blank(),
+          panel.background =element_rect(fill = NA, 
+                                         color = "black"))#+
+  #guides(fill=guide_legend(nrow=2,byrow=TRUE), shape=guide_legend(nrow=3,byrow=TRUE))
+
+Treat_fill<-scale_fill_manual(values =
+                           c("#2b83ba", "#003399",
+                             "#d7191c", "#660000"))
+
+Treat_colour<-scale_colour_manual(values =
+                           c("#2b83ba", "#003399",
+                             "#d7191c", "#660000"))
+
+```
+
+# Data
+
+```{r libraries, results="hide"}
+
+# Import YII data: 
+      YII.Tall<-read.csv("Outputs/YII_tall.csv")
+      YII.Tall<-YII.Tall[!is.na(YII.Tall$Genotype),]
+
+# Import Location data: 
+    Metadata<-read.csv("Metadata/Fragment_Replicate.csv", header = T)
+    
+  YII.Tall<-left_join(YII.Tall, Metadata, by=c("Fragment"))
+  
+  YII.Tall$Genotype<-factor(YII.Tall$Genotype.x)
+  YII.Tall$Temperature<-factor(YII.Tall$Temp)
+  
+  YII.Tall$N_T<-factor(paste(YII.Tall$Nutrients, YII.Tall$Temperature, sep = "_"))
+  YII.Tall<-YII.Tall %>% drop_na(Temp, Nutrients)
+  YII.Tall$N_T<-factor(YII.Tall$N_T, levels = c("LN_28", "HN_28", "LN_31", "HN_31"))
+  
+  YII.Tall$Date<-as.Date(YII.Tall$Date, "%Y-%m-%d")
+  YII.Tall<-droplevels(YII.Tall)
+  YII.Tall$Day<-as.numeric(difftime(YII.Tall$Date, 
+                                    as.Date("2023-05-01"), units="days"))
+summary(YII.Tall)
+
+#Remove baseline before treatments and disease
+  YII.Tall <- subset(YII.Tall, YII.Tall$Sample!='T1_A_303')
+  YII.Tall <- subset(YII.Tall, YII.Tall$Sample!='T2_A_205')
+  YII.Tall <- subset(YII.Tall, YII.Tall$Sample!='T2_A_740')
+  YII.Tall <- subset(YII.Tall, YII.Tall$Sample!='T1_D_873')
+  
+  YII.Tall<-YII.Tall[which(YII.Tall$TimePoint!="T0"),]
+  YII.Tall<-YII.Tall[which(YII.Tall$TimePoint!="T3"),]
+
+```
+
+# Descriptive stats summary
+
+```{r}
+YII.Tall %>%
+  group_by(Date, Nutrients, Temperature)%>%
+  dplyr::summarise(mean=mean(YII),
+            min=min(YII),
+            max=max(YII))
+ 
+Summary_Nut<-YII.Tall %>%
+  group_by(Date, Genotype, Nutrients, Temperature)%>%
+  dplyr::summarise(mean=mean(YII),
+            min=min(YII),
+            max=max(YII),
+            n=n())
+Summary_Nut
+# write.csv(Summary_Reef, file = "Summary_Reef.csv")
+```
+
+# Exploratory plots
+
+```{r Graphs YII, echo =FALSE}
+
+YII_T<- ggplot(YII.Tall, aes (TimePoint, YII, 
+                              colour=factor(Temp), shape=Nutrients)) +
+  #stat_summary(fun.y=mean, geom = "line")+ theme_classic() +
+  geom_jitter(aes(shape=Nutrients), alpha=0.4) + MyTheme+
+  stat_summary(fun.data = "mean_cl_boot",
+               geom = "errorbar", width = 0.2,
+               position=position_dodge(width=0.2)) +
+  stat_summary(fun.data = "mean_cl_boot",
+               geom = "point",
+               position=position_dodge(width=0.2)) +
+  ylim(0.5, 0.75)
+YII_T + facet_grid(~Genotype)
+
+YII_T1<- ggplot(YII.Tall[YII.Tall$TimePoint=="T1", ], aes (Genotype, YII, 
+                              colour=factor(Temp), shape=Nutrients)) +
+  #stat_summary(fun.y=mean, geom = "line")+ theme_classic() +
+  geom_jitter(aes(shape=Nutrients), alpha=0.4) + MyTheme+
+  stat_summary(fun.data = "mean_cl_boot",
+               geom = "errorbar", width = 0.2,
+               position=position_dodge(width=0.2)) +
+  stat_summary(fun.data = "mean_cl_boot",
+               geom = "point",
+               position=position_dodge(width=0.2)) +
+  ylim(0.5, 0.75)
+#YII_T1
+
+YII_T2<- ggplot(YII.Tall[YII.Tall$TimePoint=="T2", ], aes (Genotype, YII, 
+                              colour=factor(Temp), shape=Nutrients)) +
+  #stat_summary(fun.y=mean, geom = "line")+ theme_classic() +
+  geom_jitter(aes(shape=Nutrients), alpha=0.4) + MyTheme+
+  stat_summary(fun.data = "mean_cl_boot",
+               geom = "errorbar", width = 0.2,
+               position=position_dodge(width=0.2)) +
+  stat_summary(fun.data = "mean_cl_boot",
+               geom = "point",
+               position=position_dodge(width=0.2)) +
+  ylim(0.5, 0.75)
+#YII_T2
+
+YII_Genotype<- ggplot(YII.Tall, aes (Temperature, YII, 
+                                     colour=factor(Genotype))) +
+  geom_jitter(aes(fill=Genotype), shape=21, alpha=0.3) + 
+  stat_summary(fun.data = "mean_cl_boot",
+               geom = "errorbar", width = 0.2 )+
+  #stat_summary(fun.y=mean, geom="point", size =3, alpha=0.5) +
+  # stat_summary(fun.y=mean, geom="line") +
+  MyTheme + 
+  facet_grid(Nutrients~TimePoint)
+YII_Genotype
+
+YII_rep<- ggplot(YII.Tall, aes (Date, YII, colour=factor(Fragment))) +
+  #stat_summary(fun.data = "mean_cl_boot",geom = "errorbar", width = 0.2 )+
+  #stat_summary(fun.y=mean, geom="point", size =3, alpha=0.5) +
+  geom_line(alpha=0.5) + 
+  geom_point(aes(shape=Genotype), alpha=0.5) + MyTheme+
+  theme(legend.position = "none")
+YII_rep + ylim(0.55, 0.7) +  facet_grid (Nutrients~Temp) 
+
+```
+
+
+```{r}
+YII_Trea<- ggplot(YII.Tall[(YII.Tall$TimePoint!="T0"|YII.Tall$TimePoint!="T3"), ], 
+                  aes (Genotype, YII, colour=factor(N_T))) +
+  Treat_fill+
+  Treat_colour+
+  geom_point(aes(fill=N_T), shape=21, alpha=0.1)+
+  stat_summary(fun.data = "mean_cl_boot",geom = "errorbar",
+               width = 0.2, position=position_dodge(width=0.2))+
+  stat_summary(fun.y=mean, geom="point", 
+                position=position_dodge(width=0.2), size =2, alpha=1) +
+  stat_summary(fun.y=mean, geom="line",  position=position_dodge(width=0.2)) + 
+  MyTheme
+  # scale_x_date(date_breaks = "1 week", 
+  #              date_labels = "%b/%d")+
+YII_Trea + ylim(0.55, 0.71)+facet_grid(~TimePoint)
+
+YII_Trea_col<- ggplot(YII.Tall, 
+                  aes (TimePoint, YII, colour=factor(N_T))) +
+  Treat_fill+
+  Treat_colour+
+  #geom_point(aes(fill=N_T, shape=Disease), alpha=0.2)+
+  stat_summary(fun.data = "mean_cl_boot",geom = "errorbar",
+               width = 0.2, position=position_dodge(width=0.2))+
+  stat_summary(fun.y=mean, geom="point", 
+                position=position_dodge(width=0.2), size =2, alpha=1) +
+  MyTheme +
+  # scale_x_date(date_breaks = "1 week", 
+  #              date_labels = "%b/%d")+
+  facet_grid(~Genotype)
+YII_Trea_col
+#ggsave("Outputs/Supp_YII_Trea.svg", YII_Trea_col, width=4, height=4,dpi = 300)
+
+```
+
+# Model selection 
+
+```{r StatsForTreattmentandTime}
+
+# Libraries
+  # library(lme4)
+  library(multcomp)
+  # library(multcompView)
+
+# More complex model
+
+LM_1 <- lmer(YII ~ TimePoint * Nutrients * Temperature * Genotype +
+                             (1|Genotype/Fragment), REML=TRUE, data=YII.Tall)
+
+step(LM_1)
+anova(LM_1)
+
+```
+
+# Final model
+
+```{r}
+
+# Final model summary
+LM_1 <- lmer(YII ~ Nutrients + Temperature + TimePoint + (1 | Genotype),  data=YII.Tall)
+
+  summary(LM_1)
+  
+  layout(matrix(1:4,2,2))
+  plot(LM_1)
+  plot(Effect(c("Nutrients","Temperature"), LM_1), 
+       x.var="Temperature", multiline=T, ci.style="bars")
+
+```
+
+**Table S1:** Generalized linear mixed models used to test for differences in the photochemical efficiency (Fv /Fm) of corals exposed to temperature and nutrient treatments. Each model included nutrient and temperature as well as time point as interacting fixed effects, and coral colony as random effects.
+
+```{r}
+#Type 3 aov
+anova(LM_1)
+#Anova-like table for random effects
+ranova(LM_1)
+
+```
+
+**Table S2:** Estimated photochemical efficiency (Fv /Fm) for corals exposed to temperature and nutrient treatments. Pairwise comparisons between groups were obtained using Tukey’s HSD test (α = 0.05). Degrees of freedom are calculated with the Kenward-roger method. Confidence level (CL) used = 0.95. Non-overlapping Tukey groups denote significant differences among two given mean values. Results are averaged over the levels of Time Point. 
+
+```{r}
+#  Pair-wise comparisons
+YIIAcerEmm<-cld(emmeans(LM_1, specs = c("Nutrients", "Temperature")))
+YIIAcerEmm
+#write.csv(YIIAcerEmm, "Outputs/YII_Emm.csv")
+```
+
+# Final plot 
+
+```{r}
+
+YII_Trea<- ggplot(YII.Tall[(YII.Tall$TimePoint!="T0"|YII.Tall$TimePoint!="T3"), ], 
+                  aes (TimePoint, YII, colour=factor(N_T))) +
+  Treat_fill+
+  Treat_colour+
+  #geom_point(aes(fill=N_T), shape=21, alpha=0.1)+
+  stat_summary(fun.data = "mean_cl_boot", geom = "errorbar",
+               width = 0.2, position=position_dodge(width=0.3))+
+  stat_summary(fun.y=mean, geom="point", 
+                position=position_dodge(width=0.3), size =2, alpha=1) +
+  MyTheme #+ facet_grid(~Genotype)
+  # scale_x_date(date_breaks = "1 week", 
+  #              date_labels = "%b/%d")+
+YII_Trea 
+#ggsave("Outputs/YII_Trea.svg", YII_Trea, width=3, height=3,dpi = 300)
+
+```
+
+**Figure 2a**: Physiological response of <i>O. faveolata</i> to the environmental treatments (mean ± 95% CI). A. Photochemical efficiency of the algal symbionts (Fv/Fm). 
+
+# Packages used
+
+```{r}
+# Creates bibliography 
+#knitr::write_bib(c(.packages()), "packages.bib")
+```
