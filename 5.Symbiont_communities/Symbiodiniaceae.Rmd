@@ -4,6 +4,8 @@ author: "Ana Palacio-Castro"
 date: "`r Sys.Date()`"
 always_allow_html: yes
 output:
+  pdf_document:
+    toc: yes
   html_document:
     code_folding: hide
     fig_height: 8
@@ -11,8 +13,6 @@ output:
     df_print: paged
     toc: yes
     toc_float: yes
-  pdf_document:
-    toc: yes
   word_document:
     toc: yes
 bibliography: packages.bib
