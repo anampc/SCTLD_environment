@@ -4,15 +4,15 @@ author: "Ana Palacio-Castro"
 date: "`r Sys.Date()`"
 always_allow_html: yes
 output:
-  pdf_document:
-    toc: yes
   html_document:
     code_folding: hide
-    fig_height: 8
-    fig_width: 8
+    fig_height: 5
+    fig_width: 5
     df_print: paged
     toc: yes
     toc_float: yes
+  pdf_document:
+    toc: yes
   word_document:
     toc: yes
 bibliography: packages.bib
@@ -43,8 +43,8 @@ knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
   library(emmeans)
   library(effects)
   library(modelsummary) # model results in table
-  # library(lsmeans) #cld functon 
-  #library(jtools) # Plot modesl
+  # library(lsmeans) #cld function 
+  #library(jtools) # Plot models
   library(kableExtra) # ANOVA tables
 
 MyTheme<-theme_bw() +  
@@ -464,7 +464,7 @@ Dprop_T1 <- ggplot(T1[T1$Disease=="SCTLD", ],
                     )+
       scale_shape_manual(values=c(23, 21, 24),
                       #labels=c("Control", "SCTLD"),
-                      name = "Lession")+
+                      name = "Disease")+
       guides(fill=guide_legend(override.aes = list(shape=21)))
 #Dprop_T1
 
@@ -488,7 +488,7 @@ Dprop_T1 <- ggplot(T1[T1$Disease=="SCTLD", ],
       Treat_colour+ 
       scale_shape_manual(values=c(23, 25, 24),
                       #labels=c("Control", "SCTLD"),
-                      name = "Lession")+
+                      name = "Disease")+
       guides(fill=guide_legend(override.aes = list(shape=21)))
 Dprop_T1
 ```
@@ -582,12 +582,17 @@ A.p_Emm
 #write.csv(A.p_Emm, "Outputs/Apr_Emmeans.csv")
 ```
 
-```{r}
-Figure5 <- ggarrange(S_H_T1, ggarrange(Dprop_T1 + theme(legend.position = "none"), 
-                                       Aprop_T1+ theme(legend.position = "none"),
-                                       nrow = 2), ncol = 2)
-Figure5
-#ggsave("Outputs/Figure5.svg", Figure5, width=7, height=5,dpi = 300)
+```{r fig.width=8}
+legend <- get_legend(S_H_T1) 
+Figure3 <- ggarrange(ggarrange(S_H_T1 + 
+                                 theme(legend.position = "none",
+                                      axis.title.x=element_blank()),
+                              Dprop_T1 + theme(legend.position = "none", 
+                                      axis.title.x=element_blank()),
+                     nrow = 1, ncol = 2),
+                     legend, nrow = 2, heights = c(6,1))
+Figure3
+#ggsave("Outputs/Fig_3.svg", Figure3, width=7, height=4,dpi = 300)
 ```
 
 # Packages used
